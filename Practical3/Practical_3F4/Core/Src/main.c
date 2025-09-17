@@ -21,6 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <stdint.h>
 
 /* USER CODE END Includes */
 
@@ -44,6 +46,10 @@
 /* USER CODE BEGIN PV */
 //TODO: Define variables you think you might need
 // - Performance timing variables (e.g execution time, throughput, pixels per second, clock cycles)
+static const uint32_t kMaxIter = 100; /* Match Practical 1B default */
+static const uint32_t kNumResolutions = 5;
+static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
+static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
 
 /* USER CODE END PV */
 
@@ -52,6 +58,11 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 //TODO: Define any function prototypes you might need such as the calculate Mandelbrot function among others
+static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter);
+static void dwt_cycle_counter_init(void);
+static inline uint32_t dwt_get_cycles(void);
+static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum);
+int __io_putchar(int ch);
 
 /* USER CODE END PFP */
 
@@ -90,6 +101,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
+  dwt_cycle_counter_init();
+  printf("\r\nEEE3096S Practical 3 - STM32F4 Mandelbrot Benchmark\r\n");
+  printf("SYSCLK: %lu Hz\r\n", SystemCoreClock);
 
   /* USER CODE END 2 */
 
@@ -101,17 +115,32 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  //TODO: Visual indicator: Turn on LED0 to signal processing start
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
 
 	  //TODO: Benchmark and Profile Performance
+	  for (uint32_t i = 0; i < kNumResolutions; ++i)
+	  {
+	  	uint16_t w = kWidths[i];
+	  	uint16_t h = kHeights[i];
+	  	DWT->CYCCNT = 0; // reset cycle counter
+	  	uint32_t start_cycles = dwt_get_cycles();
+	  	uint32_t checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+	  	uint32_t end_cycles = dwt_get_cycles();
+	  	uint32_t elapsed_cycles = end_cycles - start_cycles;
+	  	log_benchmark(w, h, elapsed_cycles, checksum);
+	  }
 
 
 	  //TODO: Visual indicator: Turn on LED1 to signal processing start
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
 
 
 	  //TODO: Keep the LEDs ON for 2s
+	  HAL_Delay(2000);
 
 	  //TODO: Turn OFF LEDs
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
   }
   /* USER CODE END 3 */
 }
@@ -199,6 +228,70 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 //TODO: Function signatures you defined previously , implement them here
+
+static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter)
+{
+	uint32_t mandelbrot_sum = 0u;
+	for (uint16_t y = 0; y < height; ++y)
+	{
+		double y0 = ((double)y / (double)height) * 2.0 - 1.0;
+		for (uint16_t x = 0; x < width; ++x)
+		{
+			double x0 = ((double)x / (double)width) * 3.5 - 2.5;
+			double xi = 0.0;
+			double yi = 0.0;
+			uint32_t iteration = 0u;
+			while (iteration < max_iter && (xi*xi + yi*yi) <= 4.0)
+			{
+				double tmp = xi*xi - yi*yi + x0;
+				yi = 2.0*xi*yi + y0;
+				xi = tmp;
+				++iteration;
+			}
+			mandelbrot_sum += iteration;
+		}
+	}
+	return mandelbrot_sum;
+}
+
+static void dwt_cycle_counter_init(void)
+{
+	/* Enable TRC */
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	/* Unlock DWT (if locked) by writing the key to LAR when present */
+#ifdef DWT_LAR
+	DWT->LAR = 0xC5ACCE55;
+#endif
+	/* Reset the cycle counter */
+	DWT->CYCCNT = 0;
+	/* Enable the cycle counter */
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static inline uint32_t dwt_get_cycles(void)
+{
+	return DWT->CYCCNT;
+}
+
+static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum)
+{
+	double seconds = (double)cycles / (double)SystemCoreClock;
+	printf("Resolution %ux%u, cycles %lu, time %.6f s, checksum %lu\r\n",
+			(unsigned)width, (unsigned)height, (unsigned long)cycles, seconds, (unsigned long)checksum);
+}
+
+int __io_putchar(int ch)
+{
+	/* Route to ITM stimulus port 0 for SWV view. Requires debugger and SWO enabled. */
+	if ((ITM->TCR & ITM_TCR_ITMENA_Msk) && (CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk))
+	{
+		while (ITM->PORT[0].u32 == 0) { __NOP(); }
+		ITM->PORT[0].u8 = (uint8_t)ch;
+		return ch;
+	}
+	/* Fallback: do nothing */
+	return ch;
+}
 
 /* USER CODE END 4 */
 
