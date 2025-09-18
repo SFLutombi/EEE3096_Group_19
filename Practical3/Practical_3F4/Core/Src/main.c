@@ -46,11 +46,15 @@
 /* USER CODE BEGIN PV */
 //TODO: Define variables you think you might need
 // - Performance timing variables (e.g execution time, throughput, pixels per second, clock cycles)
-/* Task 3: Fixed MAX_ITER = 100, measure cycles and throughput */
+/* Task 5: FPU Impact Analysis - compare float vs double, FPU enabled vs disabled */
 static const uint32_t kMaxIter = 100u;
 static const uint32_t kNumResolutions = 5;
-static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
+static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};  /* Practical 1B sizes */
 static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
+
+/* Memory management for large images */
+#define MAX_TILE_SIZE 256  /* Maximum tile size that fits in available SRAM */
+#define TILE_OVERLAP 0     /* No overlap needed for Mandelbrot calculation */
 
 /* Live Expressions: current benchmark metrics */
 volatile uint32_t g_current_width = 0u;
@@ -60,11 +64,26 @@ volatile uint32_t g_current_checksum = 0u;
 volatile double g_current_execution_time = 0.0;
 volatile double g_current_throughput = 0.0;
 
-/* Live Expressions: per-size results */
-volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
-volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-volatile uint32_t cpu_cycles[5] = {0u, 0u, 0u, 0u, 0u};
-volatile double throughput_pps[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+/* Task 5: FPU Impact Analysis Results */
+/* Float precision results */
+volatile uint32_t checksum_float[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double execution_time_ms_float[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t cpu_cycles_float[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps_float[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+
+/* Double precision results */
+volatile uint32_t checksum_double[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double execution_time_ms_double[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t cpu_cycles_double[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps_double[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+
+/* Accuracy comparison */
+volatile double accuracy_diff_percent[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile double speedup_factor[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+
+/* Current test configuration */
+volatile uint32_t g_current_test_mode = 0u; /* 0=float, 1=double */
+volatile uint32_t g_fpu_enabled = 1u; /* 1=FPU enabled, 0=FPU disabled */
 
 /* USER CODE END PV */
 
@@ -73,10 +92,12 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 //TODO: Define any function prototypes you might need such as the calculate Mandelbrot function among others
-static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter);
+static uint32_t generate_mandelbrot_checksum_float(uint16_t width, uint16_t height, uint32_t max_iter);
+static uint32_t generate_mandelbrot_checksum_double(uint16_t width, uint16_t height, uint32_t max_iter);
 static void dwt_cycle_counter_init(void);
 static inline uint32_t dwt_get_cycles(void);
-static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput);
+static void log_fpu_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput, const char* precision);
+static void log_fpu_comparison(uint16_t width, uint16_t height, uint32_t checksum_float, uint32_t checksum_double, double speedup);
 int __io_putchar(int ch);
 
 /* USER CODE END PFP */
@@ -132,7 +153,11 @@ int main(void)
       /* Visual indicator: LED0 ON */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-      /* Task 3: Benchmark with fixed MAX_ITER=100, measure cycles and throughput */
+      /* Task 5: FPU Impact Analysis - Test both float and double precision */
+      
+      /* Test 1: Float precision */
+      g_current_test_mode = 0u; /* float */
+      printf("\r\n=== FPU Impact Analysis: FLOAT PRECISION ===\r\n");
       for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
       {
         uint16_t w = kWidths[size_index];
@@ -142,7 +167,7 @@ int main(void)
 
         DWT->CYCCNT = 0; // reset cycle counter
         uint32_t start_cycles = dwt_get_cycles();
-        uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+        uint32_t result_checksum = generate_mandelbrot_checksum_float(w, h, kMaxIter);
         uint32_t end_cycles = dwt_get_cycles();
         uint32_t elapsed_cycles = end_cycles - start_cycles;
         double elapsed_seconds = (double)elapsed_cycles / (double)SystemCoreClock;
@@ -152,16 +177,74 @@ int main(void)
         /* Update Live Expressions */
         g_current_cycles = elapsed_cycles;
         g_current_checksum = result_checksum;
-        g_current_execution_time = elapsed_seconds * 1000.0; // ms
+        g_current_execution_time = elapsed_seconds * 1000.0;
         g_current_throughput = throughput;
 
-        /* Store results */
-        checksum[size_index] = result_checksum;
-        execution_time_ms[size_index] = elapsed_seconds * 1000.0;
-        cpu_cycles[size_index] = elapsed_cycles;
-        throughput_pps[size_index] = throughput;
+        /* Store float results */
+        checksum_float[size_index] = result_checksum;
+        execution_time_ms_float[size_index] = elapsed_seconds * 1000.0;
+        cpu_cycles_float[size_index] = elapsed_cycles;
+        throughput_pps_float[size_index] = throughput;
 
-        log_benchmark(w, h, elapsed_cycles, result_checksum, throughput);
+        log_fpu_benchmark(w, h, elapsed_cycles, result_checksum, throughput, "FLOAT");
+      }
+      
+      /* Test 2: Double precision */
+      g_current_test_mode = 1u; /* double */
+      printf("\r\n=== FPU Impact Analysis: DOUBLE PRECISION ===\r\n");
+      for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
+      {
+        uint16_t w = kWidths[size_index];
+        uint16_t h = kHeights[size_index];
+        g_current_width = (uint32_t)w;
+        g_current_height = (uint32_t)h;
+
+        DWT->CYCCNT = 0; // reset cycle counter
+        uint32_t start_cycles = dwt_get_cycles();
+        uint32_t result_checksum = generate_mandelbrot_checksum_double(w, h, kMaxIter);
+        uint32_t end_cycles = dwt_get_cycles();
+        uint32_t elapsed_cycles = end_cycles - start_cycles;
+        double elapsed_seconds = (double)elapsed_cycles / (double)SystemCoreClock;
+        double total_pixels = (double)w * (double)h;
+        double throughput = total_pixels / elapsed_seconds;
+
+        /* Update Live Expressions */
+        g_current_cycles = elapsed_cycles;
+        g_current_checksum = result_checksum;
+        g_current_execution_time = elapsed_seconds * 1000.0;
+        g_current_throughput = throughput;
+
+        /* Store double results */
+        checksum_double[size_index] = result_checksum;
+        execution_time_ms_double[size_index] = elapsed_seconds * 1000.0;
+        cpu_cycles_double[size_index] = elapsed_cycles;
+        throughput_pps_double[size_index] = throughput;
+
+        log_fpu_benchmark(w, h, elapsed_cycles, result_checksum, throughput, "DOUBLE");
+      }
+      
+      /* Calculate and log comparisons */
+      printf("\r\n=== FPU Impact Analysis: COMPARISON ===\r\n");
+      for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
+      {
+        uint16_t w = kWidths[size_index];
+        uint16_t h = kHeights[size_index];
+        
+        /* Calculate accuracy difference */
+        double accuracy_diff = 0.0;
+        if (checksum_double[size_index] != 0) {
+          accuracy_diff = ((double)checksum_float[size_index] - (double)checksum_double[size_index]) / (double)checksum_double[size_index] * 100.0;
+        }
+        accuracy_diff_percent[size_index] = accuracy_diff;
+        
+        /* Calculate speedup factor */
+        double speedup = 0.0;
+        if (execution_time_ms_float[size_index] != 0) {
+          speedup = execution_time_ms_double[size_index] / execution_time_ms_float[size_index];
+        }
+        speedup_factor[size_index] = speedup;
+        
+        log_fpu_comparison(w, h, checksum_float[size_index], checksum_double[size_index], speedup);
       }
 
       /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
@@ -256,7 +339,32 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 //TODO: Function signatures you defined previously , implement them here
 
-static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter)
+static uint32_t generate_mandelbrot_checksum_float(uint16_t width, uint16_t height, uint32_t max_iter)
+{
+	uint32_t mandelbrot_sum = 0u;
+	for (uint16_t y = 0; y < height; ++y)
+	{
+		float y0 = ((float)y / (float)height) * 2.0f - 1.0f;
+		for (uint16_t x = 0; x < width; ++x)
+		{
+			float x0 = ((float)x / (float)width) * 3.5f - 2.5f;
+			float xi = 0.0f;
+			float yi = 0.0f;
+			uint32_t iteration = 0u;
+			while (iteration < max_iter && (xi*xi + yi*yi) <= 4.0f)
+			{
+				float tmp = xi*xi - yi*yi + x0;
+				yi = 2.0f*xi*yi + y0;
+				xi = tmp;
+				++iteration;
+			}
+			mandelbrot_sum += iteration;
+		}
+	}
+	return mandelbrot_sum;
+}
+
+static uint32_t generate_mandelbrot_checksum_double(uint16_t width, uint16_t height, uint32_t max_iter)
 {
 	uint32_t mandelbrot_sum = 0u;
 	for (uint16_t y = 0; y < height; ++y)
@@ -300,11 +408,17 @@ static inline uint32_t dwt_get_cycles(void)
 	return DWT->CYCCNT;
 }
 
-static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput)
+static void log_fpu_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput, const char* precision)
 {
 	double seconds = (double)cycles / (double)SystemCoreClock;
-	printf("Resolution %ux%u, cycles %lu, time %.6f s, throughput %.0f pps, checksum %lu\r\n",
-			(unsigned)width, (unsigned)height, (unsigned long)cycles, seconds, throughput, (unsigned long)checksum);
+	printf("%s: %ux%u, cycles %lu, time %.6f s, throughput %.0f pps, checksum %lu\r\n",
+			precision, (unsigned)width, (unsigned)height, (unsigned long)cycles, seconds, throughput, (unsigned long)checksum);
+}
+
+static void log_fpu_comparison(uint16_t width, uint16_t height, uint32_t checksum_float, uint32_t checksum_double, double speedup)
+{
+	printf("COMPARISON %ux%u: Float checksum %lu, Double checksum %lu, Speedup %.2fx\r\n",
+			(unsigned)width, (unsigned)height, (unsigned long)checksum_float, (unsigned long)checksum_double, speedup);
 }
 
 int __io_putchar(int ch)

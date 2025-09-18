@@ -42,11 +42,15 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* Task 3: Fixed MAX_ITER = 100, measure cycles and throughput */
+/* Task 4: Scalability test up to Full HD (1920x1080) with tiling */
 static const uint32_t kMaxIter = 100u;
-static const uint32_t kNumResolutions = 5;
-static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
-static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
+static const uint32_t kNumResolutions = 8;
+static const uint16_t kWidths[8]  = {128, 256, 512, 640, 800, 1024, 1280, 1920};
+static const uint16_t kHeights[8] = {128, 256, 512, 480, 600, 768, 720, 1080};
+
+/* Memory management for large images */
+#define MAX_TILE_SIZE 128  /* Smaller tile size for F0 due to limited SRAM */
+#define TILE_OVERLAP 0     /* No overlap needed for Mandelbrot calculation */
 
 /* Live Expressions: current benchmark metrics */
 volatile uint32_t g_current_width = 0u;
@@ -57,10 +61,16 @@ volatile double g_current_execution_time = 0.0;
 volatile double g_current_throughput = 0.0;
 
 /* Live Expressions: per-size results */
-volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
-volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-volatile uint32_t cpu_cycles[5] = {0u, 0u, 0u, 0u, 0u};
-volatile double throughput_pps[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t checksum[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
+volatile double execution_time_ms[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t cpu_cycles[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
+/* Task 4: Tiling information */
+volatile uint32_t g_num_tiles_x = 0u;
+volatile uint32_t g_num_tiles_y = 0u;
+volatile uint32_t g_total_tiles = 0u;
+volatile uint32_t g_current_tile = 0u;
 
 /* USER CODE END PV */
 
@@ -69,7 +79,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter);
+static uint32_t generate_mandelbrot_checksum_tiled(uint16_t width, uint16_t height, uint32_t max_iter);
 static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms);
+static void log_tiling_info(uint16_t width, uint16_t height, uint32_t tiles_x, uint32_t tiles_y);
 
 /* USER CODE END PFP */
 
@@ -121,7 +133,7 @@ int main(void)
       /* Visual indicator: LED0 ON */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-      /* Task 3: Benchmark with fixed MAX_ITER=100, measure cycles and throughput */
+      /* Task 4: Scalability test up to Full HD with tiling for large images */
       for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
       {
         uint16_t w = kWidths[size_index];
@@ -130,7 +142,15 @@ int main(void)
         g_current_height = (uint32_t)h;
 
         uint32_t start_ms = HAL_GetTick();
-        uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+        
+        /* Use tiled approach for large images that exceed memory constraints */
+        uint32_t result_checksum;
+        if (w > MAX_TILE_SIZE || h > MAX_TILE_SIZE) {
+          result_checksum = generate_mandelbrot_checksum_tiled(w, h, kMaxIter);
+        } else {
+          result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+        }
+        
         uint32_t end_ms = HAL_GetTick();
         uint32_t elapsed_ms = end_ms - start_ms;
         
@@ -258,6 +278,72 @@ static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, ui
     }
   }
   return mandelbrot_sum;
+}
+
+static uint32_t generate_mandelbrot_checksum_tiled(uint16_t width, uint16_t height, uint32_t max_iter)
+{
+  uint32_t total_checksum = 0u;
+  
+  /* Calculate number of tiles needed */
+  uint32_t tiles_x = (width + MAX_TILE_SIZE - 1) / MAX_TILE_SIZE;
+  uint32_t tiles_y = (height + MAX_TILE_SIZE - 1) / MAX_TILE_SIZE;
+  uint32_t total_tiles = tiles_x * tiles_y;
+  
+  /* Update Live Expressions with tiling info */
+  g_num_tiles_x = tiles_x;
+  g_num_tiles_y = tiles_y;
+  g_total_tiles = total_tiles;
+  
+  log_tiling_info(width, height, tiles_x, tiles_y);
+  
+  /* Process each tile */
+  for (uint32_t tile_y = 0; tile_y < tiles_y; ++tile_y)
+  {
+    for (uint32_t tile_x = 0; tile_x < tiles_x; ++tile_x)
+    {
+      g_current_tile = tile_y * tiles_x + tile_x + 1;
+      
+      /* Calculate tile boundaries */
+      uint16_t start_x = tile_x * MAX_TILE_SIZE;
+      uint16_t start_y = tile_y * MAX_TILE_SIZE;
+      uint16_t end_x = (start_x + MAX_TILE_SIZE > width) ? width : start_x + MAX_TILE_SIZE;
+      uint16_t end_y = (start_y + MAX_TILE_SIZE > height) ? height : start_y + MAX_TILE_SIZE;
+      uint16_t tile_width = end_x - start_x;
+      uint16_t tile_height = end_y - start_y;
+      
+      /* Process this tile */
+      for (uint16_t y = 0; y < tile_height; ++y)
+      {
+        uint16_t global_y = start_y + y;
+        double y0 = ((double)global_y / (double)height) * 2.0 - 1.0;
+        for (uint16_t x = 0; x < tile_width; ++x)
+        {
+          uint16_t global_x = start_x + x;
+          double x0 = ((double)global_x / (double)width) * 3.5 - 2.5;
+          double xi = 0.0;
+          double yi = 0.0;
+          uint32_t iteration = 0u;
+          while (iteration < max_iter && (xi*xi + yi*yi) <= 4.0)
+          {
+            double tmp = xi*xi - yi*yi + x0;
+            yi = 2.0*xi*yi + y0;
+            xi = tmp;
+            ++iteration;
+          }
+          total_checksum += iteration;
+        }
+      }
+    }
+  }
+  
+  return total_checksum;
+}
+
+static void log_tiling_info(uint16_t width, uint16_t height, uint32_t tiles_x, uint32_t tiles_y)
+{
+  /* Note: F0 doesn't have printf capability, so this is a placeholder */
+  /* In a real implementation, you might use SWO or UART for logging */
+  (void)width; (void)height; (void)tiles_x; (void)tiles_y; /* Suppress unused warnings */
 }
 
 static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms)
