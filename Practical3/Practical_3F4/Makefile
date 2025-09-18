@@ -92,12 +92,12 @@ BIN = $(CP) -O binary -S
 # cpu
 CPU = -mcpu=cortex-m4
 
-# FPU ENABLED for Task 5
+# FPU DISABLED for Task 5
 # fpu
-FPU = -mfpu=fpv4-sp-d16
+FPU = 
 
 # float-abi
-FLOAT-ABI = -mfloat-abi=hard
+FLOAT-ABI = -mfloat-abi=soft
 
 # mcu
 MCU = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)
