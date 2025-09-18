@@ -46,7 +46,8 @@
 /* USER CODE BEGIN PV */
 //TODO: Define variables you think you might need
 // - Performance timing variables (e.g execution time, throughput, pixels per second, clock cycles)
-static const uint32_t kMaxIter = 100; /* Match Practical 1B default */
+static const uint32_t kNumIters = 5;
+static const uint32_t kIters[5] = {100u, 250u, 500u, 750u, 1000u};
 static const uint32_t kNumResolutions = 5;
 static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
 static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
@@ -56,9 +57,14 @@ volatile uint32_t g_current_height = 0u;
 volatile uint32_t g_current_cycles = 0u;
 volatile uint32_t g_current_checksum = 0u;
 volatile double g_current_execution_time = 0.0;
-/* Live Expressions: per-resolution results (index maps to increasing image size) */
+/* Live Expressions: per-iter (rows) x per-size (cols) results */
+volatile uint32_t checksum_table[5][5] = {0};
+volatile double execution_time_ms_table[5][5] = {0};
+/* Backwards compatibility (latest iter sweep results for current image-size row) */
 volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
 volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+/* Current context */
+volatile uint32_t g_current_iter = 0u;
 
 /* USER CODE END PV */
 
@@ -128,28 +134,35 @@ int main(void)
 
 
 	  //TODO: Benchmark and Profile Performance
-	  for (uint32_t i = 0; i < kNumResolutions; ++i)
+	  for (uint32_t iter_index = 0; iter_index < kNumIters; ++iter_index)
 	  {
-	  	uint16_t w = kWidths[i];
-	  	uint16_t h = kHeights[i];
-	  	/* Update Live Expressions with the resolution under test */
-	  	g_current_width = (uint32_t)w;
-	  	g_current_height = (uint32_t)h;
-	  	DWT->CYCCNT = 0; // reset cycle counter
-	  	uint32_t start_cycles = dwt_get_cycles();
-	  	uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
-	  	uint32_t end_cycles = dwt_get_cycles();
-	  	uint32_t elapsed_cycles = end_cycles - start_cycles;
-	  	/* Update Live Expressions with timing and checksum */
-	  	g_current_cycles = elapsed_cycles;
-	  	g_current_checksum = result_checksum;
-	  	g_current_execution_time = (double)elapsed_cycles / (double)SystemCoreClock;
-	  	/* Store per-resolution results */
-	  	if (i < 5) {
-	  		checksum[i] = result_checksum;
-	  		execution_time_ms[i] = ((double)elapsed_cycles * 1000.0) / (double)SystemCoreClock;
+	  	g_current_iter = kIters[iter_index];
+	  	for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
+	  	{
+	  		uint16_t w = kWidths[size_index];
+	  		uint16_t h = kHeights[size_index];
+	  		/* Update Live Expressions with the resolution under test */
+	  		g_current_width = (uint32_t)w;
+	  		g_current_height = (uint32_t)h;
+	  		DWT->CYCCNT = 0; // reset cycle counter
+	  		uint32_t start_cycles = dwt_get_cycles();
+	  		uint32_t result_checksum = generate_mandelbrot_checksum(w, h, g_current_iter);
+	  		uint32_t end_cycles = dwt_get_cycles();
+	  		uint32_t elapsed_cycles = end_cycles - start_cycles;
+	  		/* Update Live Expressions with timing and checksum */
+	  		g_current_cycles = elapsed_cycles;
+	  		g_current_checksum = result_checksum;
+	  		g_current_execution_time = (double)elapsed_cycles / (double)SystemCoreClock;
+	  		/* Store per-iter x per-size results */
+	  		if (iter_index < 5 && size_index < 5) {
+	  			checksum_table[iter_index][size_index] = result_checksum;
+	  			execution_time_ms_table[iter_index][size_index] = ((double)elapsed_cycles * 1000.0) / (double)SystemCoreClock;
+	  			/* Also keep the most recent row for convenience */
+	  			checksum[size_index] = result_checksum;
+	  			execution_time_ms[size_index] = execution_time_ms_table[iter_index][size_index];
+	  		}
+	  		log_benchmark(w, h, elapsed_cycles, result_checksum);
 	  	}
-	  	log_benchmark(w, h, elapsed_cycles, result_checksum);
 	  }
 
 
