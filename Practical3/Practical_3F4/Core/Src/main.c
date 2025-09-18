@@ -50,6 +50,15 @@ static const uint32_t kMaxIter = 100; /* Match Practical 1B default */
 static const uint32_t kNumResolutions = 5;
 static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
 static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
+/* Live Expressions: current benchmark metrics */
+volatile uint32_t g_current_width = 0u;
+volatile uint32_t g_current_height = 0u;
+volatile uint32_t g_current_cycles = 0u;
+volatile uint32_t g_current_checksum = 0u;
+volatile double g_current_execution_time = 0.0;
+/* Live Expressions: per-resolution results (index maps to increasing image size) */
+volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 
 /* USER CODE END PV */
 
@@ -123,12 +132,24 @@ int main(void)
 	  {
 	  	uint16_t w = kWidths[i];
 	  	uint16_t h = kHeights[i];
+	  	/* Update Live Expressions with the resolution under test */
+	  	g_current_width = (uint32_t)w;
+	  	g_current_height = (uint32_t)h;
 	  	DWT->CYCCNT = 0; // reset cycle counter
 	  	uint32_t start_cycles = dwt_get_cycles();
-	  	uint32_t checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+	  	uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
 	  	uint32_t end_cycles = dwt_get_cycles();
 	  	uint32_t elapsed_cycles = end_cycles - start_cycles;
-	  	log_benchmark(w, h, elapsed_cycles, checksum);
+	  	/* Update Live Expressions with timing and checksum */
+	  	g_current_cycles = elapsed_cycles;
+	  	g_current_checksum = result_checksum;
+	  	g_current_execution_time = (double)elapsed_cycles / (double)SystemCoreClock;
+	  	/* Store per-resolution results */
+	  	if (i < 5) {
+	  		checksum[i] = result_checksum;
+	  		execution_time_ms[i] = ((double)elapsed_cycles * 1000.0) / (double)SystemCoreClock;
+	  	}
+	  	log_benchmark(w, h, elapsed_cycles, result_checksum);
 	  }
 
 
