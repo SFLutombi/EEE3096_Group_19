@@ -42,24 +42,25 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-static const uint32_t kNumIters = 5;
-static const uint32_t kIters[5] = {100u, 250u, 500u, 750u, 1000u};
+/* Task 3: Fixed MAX_ITER = 100, measure cycles and throughput */
+static const uint32_t kMaxIter = 100u;
 static const uint32_t kNumResolutions = 5;
 static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
 static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
 
-/* Live Expressions: current run context */
-volatile uint32_t g_current_iter = 0u;
+/* Live Expressions: current benchmark metrics */
 volatile uint32_t g_current_width = 0u;
 volatile uint32_t g_current_height = 0u;
+volatile uint32_t g_current_cycles = 0u;
 volatile uint32_t g_current_checksum = 0u;
-volatile double   g_current_execution_time = 0.0;
+volatile double g_current_execution_time = 0.0;
+volatile double g_current_throughput = 0.0;
 
-/* Live Expressions: per-iter x per-size tables and convenience row */
-volatile uint32_t checksum_table[5][5] = {0};
-volatile double   execution_time_ms_table[5][5] = {0};
+/* Live Expressions: per-size results */
 volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
-volatile double   execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t cpu_cycles[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 
 /* USER CODE END PV */
 
@@ -68,6 +69,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter);
+static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms);
 
 /* USER CODE END PFP */
 
@@ -119,31 +121,36 @@ int main(void)
       /* Visual indicator: LED0 ON */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-      /* Sweep MAX_ITER and image sizes */
-      for (uint32_t iter_index = 0; iter_index < kNumIters; ++iter_index)
+      /* Task 3: Benchmark with fixed MAX_ITER=100, measure cycles and throughput */
+      for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
       {
-        g_current_iter = kIters[iter_index];
-        for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
-        {
-          uint16_t w = kWidths[size_index];
-          uint16_t h = kHeights[size_index];
-          g_current_width = (uint32_t)w;
-          g_current_height = (uint32_t)h;
+        uint16_t w = kWidths[size_index];
+        uint16_t h = kHeights[size_index];
+        g_current_width = (uint32_t)w;
+        g_current_height = (uint32_t)h;
 
-          uint32_t start_ms = HAL_GetTick();
-          uint32_t result_checksum = generate_mandelbrot_checksum(w, h, g_current_iter);
-          uint32_t end_ms = HAL_GetTick();
-          uint32_t elapsed_ms = end_ms - start_ms;
+        uint32_t start_ms = HAL_GetTick();
+        uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+        uint32_t end_ms = HAL_GetTick();
+        uint32_t elapsed_ms = end_ms - start_ms;
+        
+        /* Estimate CPU cycles from elapsed time (F0 doesn't have DWT) */
+        uint32_t estimated_cycles = estimate_cpu_cycles_from_ms(elapsed_ms);
+        double elapsed_seconds = (double)elapsed_ms / 1000.0;
+        double total_pixels = (double)w * (double)h;
+        double throughput = total_pixels / elapsed_seconds;
 
-          g_current_checksum = result_checksum;
-          g_current_execution_time = (double)elapsed_ms;
+        /* Update Live Expressions */
+        g_current_cycles = estimated_cycles;
+        g_current_checksum = result_checksum;
+        g_current_execution_time = (double)elapsed_ms;
+        g_current_throughput = throughput;
 
-          checksum_table[iter_index][size_index] = result_checksum;
-          execution_time_ms_table[iter_index][size_index] = (double)elapsed_ms;
-
-          checksum[size_index] = result_checksum;
-          execution_time_ms[size_index] = (double)elapsed_ms;
-        }
+        /* Store results */
+        checksum[size_index] = result_checksum;
+        execution_time_ms[size_index] = (double)elapsed_ms;
+        cpu_cycles[size_index] = estimated_cycles;
+        throughput_pps[size_index] = throughput;
       }
 
       /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
@@ -251,6 +258,13 @@ static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, ui
     }
   }
   return mandelbrot_sum;
+}
+
+static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms)
+{
+  /* Estimate CPU cycles based on SystemCoreClock and elapsed milliseconds */
+  /* This is an approximation since F0 doesn't have DWT cycle counter */
+  return elapsed_ms * (SystemCoreClock / 1000u);
 }
 
 /* USER CODE END 4 */

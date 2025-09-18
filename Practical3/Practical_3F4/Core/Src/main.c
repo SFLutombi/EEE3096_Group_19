@@ -46,25 +46,25 @@
 /* USER CODE BEGIN PV */
 //TODO: Define variables you think you might need
 // - Performance timing variables (e.g execution time, throughput, pixels per second, clock cycles)
-static const uint32_t kNumIters = 5;
-static const uint32_t kIters[5] = {100u, 250u, 500u, 750u, 1000u};
+/* Task 3: Fixed MAX_ITER = 100, measure cycles and throughput */
+static const uint32_t kMaxIter = 100u;
 static const uint32_t kNumResolutions = 5;
 static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};
 static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
+
 /* Live Expressions: current benchmark metrics */
 volatile uint32_t g_current_width = 0u;
 volatile uint32_t g_current_height = 0u;
 volatile uint32_t g_current_cycles = 0u;
 volatile uint32_t g_current_checksum = 0u;
 volatile double g_current_execution_time = 0.0;
-/* Live Expressions: per-iter (rows) x per-size (cols) results */
-volatile uint32_t checksum_table[5][5] = {0};
-volatile double execution_time_ms_table[5][5] = {0};
-/* Backwards compatibility (latest iter sweep results for current image-size row) */
+volatile double g_current_throughput = 0.0;
+
+/* Live Expressions: per-size results */
 volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
 volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-/* Current context */
-volatile uint32_t g_current_iter = 0u;
+volatile uint32_t cpu_cycles[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 
 /* USER CODE END PV */
 
@@ -76,7 +76,7 @@ static void MX_GPIO_Init(void);
 static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, uint32_t max_iter);
 static void dwt_cycle_counter_init(void);
 static inline uint32_t dwt_get_cycles(void);
-static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum);
+static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput);
 int __io_putchar(int ch);
 
 /* USER CODE END PFP */
@@ -129,52 +129,45 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  //TODO: Visual indicator: Turn on LED0 to signal processing start
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+      /* Visual indicator: LED0 ON */
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
+      /* Task 3: Benchmark with fixed MAX_ITER=100, measure cycles and throughput */
+      for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
+      {
+        uint16_t w = kWidths[size_index];
+        uint16_t h = kHeights[size_index];
+        g_current_width = (uint32_t)w;
+        g_current_height = (uint32_t)h;
 
-	  //TODO: Benchmark and Profile Performance
-	  for (uint32_t iter_index = 0; iter_index < kNumIters; ++iter_index)
-	  {
-	  	g_current_iter = kIters[iter_index];
-	  	for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
-	  	{
-	  		uint16_t w = kWidths[size_index];
-	  		uint16_t h = kHeights[size_index];
-	  		/* Update Live Expressions with the resolution under test */
-	  		g_current_width = (uint32_t)w;
-	  		g_current_height = (uint32_t)h;
-	  		DWT->CYCCNT = 0; // reset cycle counter
-	  		uint32_t start_cycles = dwt_get_cycles();
-	  		uint32_t result_checksum = generate_mandelbrot_checksum(w, h, g_current_iter);
-	  		uint32_t end_cycles = dwt_get_cycles();
-	  		uint32_t elapsed_cycles = end_cycles - start_cycles;
-	  		/* Update Live Expressions with timing and checksum */
-	  		g_current_cycles = elapsed_cycles;
-	  		g_current_checksum = result_checksum;
-	  		g_current_execution_time = (double)elapsed_cycles / (double)SystemCoreClock;
-	  		/* Store per-iter x per-size results */
-	  		if (iter_index < 5 && size_index < 5) {
-	  			checksum_table[iter_index][size_index] = result_checksum;
-	  			execution_time_ms_table[iter_index][size_index] = ((double)elapsed_cycles * 1000.0) / (double)SystemCoreClock;
-	  			/* Also keep the most recent row for convenience */
-	  			checksum[size_index] = result_checksum;
-	  			execution_time_ms[size_index] = execution_time_ms_table[iter_index][size_index];
-	  		}
-	  		log_benchmark(w, h, elapsed_cycles, result_checksum);
-	  	}
-	  }
+        DWT->CYCCNT = 0; // reset cycle counter
+        uint32_t start_cycles = dwt_get_cycles();
+        uint32_t result_checksum = generate_mandelbrot_checksum(w, h, kMaxIter);
+        uint32_t end_cycles = dwt_get_cycles();
+        uint32_t elapsed_cycles = end_cycles - start_cycles;
+        double elapsed_seconds = (double)elapsed_cycles / (double)SystemCoreClock;
+        double total_pixels = (double)w * (double)h;
+        double throughput = total_pixels / elapsed_seconds;
 
+        /* Update Live Expressions */
+        g_current_cycles = elapsed_cycles;
+        g_current_checksum = result_checksum;
+        g_current_execution_time = elapsed_seconds * 1000.0; // ms
+        g_current_throughput = throughput;
 
-	  //TODO: Visual indicator: Turn on LED1 to signal processing start
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+        /* Store results */
+        checksum[size_index] = result_checksum;
+        execution_time_ms[size_index] = elapsed_seconds * 1000.0;
+        cpu_cycles[size_index] = elapsed_cycles;
+        throughput_pps[size_index] = throughput;
 
+        log_benchmark(w, h, elapsed_cycles, result_checksum, throughput);
+      }
 
-	  //TODO: Keep the LEDs ON for 2s
-	  HAL_Delay(2000);
-
-	  //TODO: Turn OFF LEDs
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
+      /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+      HAL_Delay(2000);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PIN_RESET);
   }
   /* USER CODE END 3 */
 }
@@ -307,11 +300,11 @@ static inline uint32_t dwt_get_cycles(void)
 	return DWT->CYCCNT;
 }
 
-static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum)
+static void log_benchmark(uint16_t width, uint16_t height, uint32_t cycles, uint32_t checksum, double throughput)
 {
 	double seconds = (double)cycles / (double)SystemCoreClock;
-	printf("Resolution %ux%u, cycles %lu, time %.6f s, checksum %lu\r\n",
-			(unsigned)width, (unsigned)height, (unsigned long)cycles, seconds, (unsigned long)checksum);
+	printf("Resolution %ux%u, cycles %lu, time %.6f s, throughput %.0f pps, checksum %lu\r\n",
+			(unsigned)width, (unsigned)height, (unsigned long)cycles, seconds, throughput, (unsigned long)checksum);
 }
 
 int __io_putchar(int ch)
