@@ -15,7 +15,6 @@
 ######################################
 TARGET = Practical_3F4
 
-
 ######################################
 # building variables
 ######################################
@@ -25,7 +24,6 @@ DEBUG = 1
 # TODO:Compiler Optimisation levels
 # optimization
 OPT = -Og
-
 
 #######################################
 # paths
@@ -68,7 +66,6 @@ ASMM_SOURCES =
 # ASMMC sources
 ASMMC_SOURCE = 
 
-
 #######################################
 # binaries
 #######################################
@@ -95,7 +92,7 @@ BIN = $(CP) -O binary -S
 # cpu
 CPU = -mcpu=cortex-m4
 
-#TODO: FPU Enbale/Disable
+# FPU ENABLED for Task 5
 # fpu
 FPU = -mfpu=fpv4-sp-d16
 
@@ -114,7 +111,6 @@ C_DEFS =  \
 -DUSE_HAL_DRIVER \
 -DSTM32F446xx
 
-
 # AS includes
 AS_INCLUDES = 
 
@@ -126,7 +122,6 @@ C_INCLUDES =  \
 -IDrivers/CMSIS/Device/ST/STM32F4xx/Include \
 -IDrivers/CMSIS/Include
 
-
 # compile gcc flags
 ASFLAGS = $(MCU) $(AS_DEFS) $(AS_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
 
@@ -136,10 +131,8 @@ ifeq ($(DEBUG), 1)
 CFLAGS += -g -gdwarf-2
 endif
 
-
 # Generate dependency information
 CFLAGS += -MMD -MP -MF"$(@:%.o=%.d)"
-
 
 #######################################
 # LDFLAGS
@@ -154,7 +147,6 @@ LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(BU
 
 # default action: build all
 all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).hex $(BUILD_DIR)/$(TARGET).bin
-
 
 #######################################
 # build the application
