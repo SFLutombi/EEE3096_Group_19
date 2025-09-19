@@ -21,9 +21,9 @@ TARGET = Practical_3F4
 # debug build?
 DEBUG = 1
 
-# Task 6: Compiler Optimization Analysis - O3 (Aggressive Optimization)
+# Task 6: Compiler Optimization Analysis - O0 (No Optimization)
 # optimization
-OPT = -O3
+OPT = -O0
 
 #######################################
 # paths

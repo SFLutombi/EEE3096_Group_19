@@ -31,6 +31,24 @@ double g_total_time_sum = 0.0;
 uint32_t g_test_counter = 0u;
 uint32_t g_simple_test = 0u;  /* Simple test variable */
 
+/* Task 7: Fixed-Point Arithmetic Analysis */
+/* Fixed-point scaling factors to test */
+static const uint32_t kNumScalingFactors = 3;
+static const uint32_t kScalingFactors[3] = {1000u, 10000u, 1000000u};  /* 10^3, 10^4, 10^6 */
+static const char* kScalingFactorNames[3] = {"10^3", "10^4", "10^6"};
+
+/* Fixed-point results for each scaling factor */
+uint32_t g_fixed_checksum[3][5] = {{0}};  /* [scaling_factor][resolution] */
+double g_fixed_execution_time_ms[3][5] = {{0.0}};
+uint32_t g_fixed_overflow_count[3] = {0u, 0u, 0u};  /* Overflow counter per scaling factor */
+uint32_t g_current_scaling_factor = 0u;  /* Current scaling factor being tested */
+uint32_t g_current_scaling_index = 0u;   /* Index of current scaling factor */
+
+/* Task 8: Power Measurement Analysis */
+double g_estimated_power_f0_mw = 0.0;
+double g_energy_consumption_f0_mj = 0.0;
+uint32_t g_power_measurement_cycles = 0u;
+
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
@@ -89,6 +107,18 @@ static uint32_t generate_mandelbrot_checksum(uint16_t width, uint16_t height, ui
 static uint32_t generate_mandelbrot_checksum_tiled(uint16_t width, uint16_t height, uint32_t max_iter);
 static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms);
 static void log_tiling_info(uint16_t width, uint16_t height, uint32_t tiles_x, uint32_t tiles_y);
+
+/* Task 7: Fixed-point arithmetic functions */
+static int64_t fixed_multiply(int64_t a, int64_t b, uint32_t scale);
+static int64_t fixed_add(int64_t a, int64_t b);
+static int64_t double_to_fixed(double value, uint32_t scale);
+static double fixed_to_double(int64_t value, uint32_t scale);
+static uint32_t generate_mandelbrot_checksum_fixed_point(uint16_t width, uint16_t height, uint32_t max_iter, uint32_t scale);
+
+/* Task 8: Power measurement functions */
+static void analyze_power_consumption_f0(void);
+static double estimate_power_consumption_f0(uint32_t elapsed_ms);
+static void extrapolate_power_consumption_f0(void);
 
 /* USER CODE END PFP */
 
@@ -206,6 +236,52 @@ int main(void)
       
       /* Debug: Store raw values for debugging */
       g_total_program_cycles = total_elapsed_ms;  /* Store raw ms value for debugging */
+
+      /* Task 7: Fixed-Point Arithmetic Analysis */
+      printf("\r\n=== Task 7: Fixed-Point Arithmetic Analysis ===\r\n");
+      
+      /* Test each scaling factor */
+      for (uint32_t scale_idx = 0; scale_idx < kNumScalingFactors; ++scale_idx)
+      {
+        uint32_t scale = kScalingFactors[scale_idx];
+        g_current_scaling_factor = scale;
+        g_current_scaling_index = scale_idx;
+        
+        printf("\r\n--- Scaling Factor: %s (%lu) ---\r\n", kScalingFactorNames[scale_idx], (unsigned long)scale);
+        
+        /* Test each resolution */
+        for (uint32_t size_index = 0; size_index < kNumResolutions; ++size_index)
+        {
+          uint16_t w = kWidths[size_index];
+          uint16_t h = kHeights[size_index];
+          
+          /* Time the fixed-point calculation */
+          uint32_t start_ms = HAL_GetTick();
+          uint32_t result_checksum = generate_mandelbrot_checksum_fixed_point(w, h, kMaxIter, scale);
+          uint32_t end_ms = HAL_GetTick();
+          uint32_t elapsed_ms = end_ms - start_ms;
+          
+          /* Store results */
+          g_fixed_checksum[scale_idx][size_index] = result_checksum;
+          g_fixed_execution_time_ms[scale_idx][size_index] = (double)elapsed_ms;
+          
+          printf("Resolution %ux%u: %lu ms, checksum %lu, overflows %lu\r\n",
+                 (unsigned)w, (unsigned)h, (unsigned long)elapsed_ms, 
+                 (unsigned long)result_checksum, (unsigned long)g_fixed_overflow_count[scale_idx]);
+        }
+      }
+      
+      /* Print analysis summary */
+      printf("\r\n=== Fixed-Point Analysis Summary ===\r\n");
+      for (uint32_t scale_idx = 0; scale_idx < kNumScalingFactors; ++scale_idx)
+      {
+        printf("Scaling Factor %s: Total overflows = %lu\r\n", 
+               kScalingFactorNames[scale_idx], (unsigned long)g_fixed_overflow_count[scale_idx]);
+      }
+
+      /* Task 8: Power Measurement Analysis */
+      analyze_power_consumption_f0();
+      extrapolate_power_consumption_f0();
 
       /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
@@ -385,6 +461,164 @@ static uint32_t estimate_cpu_cycles_from_ms(uint32_t elapsed_ms)
   /* Estimate CPU cycles based on SystemCoreClock and elapsed milliseconds */
   /* This is an approximation since F0 doesn't have DWT cycle counter */
   return elapsed_ms * (SystemCoreClock / 1000u);
+}
+
+/* Task 7: Fixed-point arithmetic functions */
+static int64_t fixed_multiply(int64_t a, int64_t b, uint32_t scale)
+{
+  /* Multiply two fixed-point numbers and scale back */
+  int64_t result = (a * b) / (int64_t)scale;
+  return result;
+}
+
+static int64_t fixed_add(int64_t a, int64_t b)
+{
+  return a + b;
+}
+
+static int64_t double_to_fixed(double value, uint32_t scale)
+{
+  return (int64_t)(value * (double)scale);
+}
+
+static double fixed_to_double(int64_t value, uint32_t scale)
+{
+  return (double)value / (double)scale;
+}
+
+static uint32_t generate_mandelbrot_checksum_fixed_point(uint16_t width, uint16_t height, uint32_t max_iter, uint32_t scale)
+{
+  uint32_t mandelbrot_sum = 0u;
+  uint32_t overflow_count = 0u;
+  
+  /* Fixed-point constants */
+  int64_t scale_2_0 = double_to_fixed(2.0, scale);      /* 2.0 in fixed-point */
+  int64_t scale_4_0 = double_to_fixed(4.0, scale);      /* 4.0 in fixed-point */
+  int64_t scale_3_5 = double_to_fixed(3.5, scale);      /* 3.5 in fixed-point */
+  int64_t scale_2_5 = double_to_fixed(2.5, scale);      /* 2.5 in fixed-point */
+  
+  for (uint16_t y = 0; y < height; ++y)
+  {
+    int64_t y0_fixed = fixed_multiply(double_to_fixed((double)y, scale), scale_2_0, scale) / (int64_t)height - double_to_fixed(1.0, scale);
+    
+    for (uint16_t x = 0; x < width; ++x)
+    {
+      int64_t x0_fixed = fixed_multiply(double_to_fixed((double)x, scale), scale_3_5, scale) / (int64_t)width - scale_2_5;
+      int64_t xi_fixed = 0;
+      int64_t yi_fixed = 0;
+      uint32_t iteration = 0u;
+      
+      while (iteration < max_iter)
+      {
+        /* Check for overflow before multiplication */
+        if (xi_fixed > 1000000 || xi_fixed < -1000000 || yi_fixed > 1000000 || yi_fixed < -1000000)
+        {
+          overflow_count++;
+          break;
+        }
+        
+        /* Calculate xi^2 + yi^2 in fixed-point */
+        int64_t xi_squared = fixed_multiply(xi_fixed, xi_fixed, scale);
+        int64_t yi_squared = fixed_multiply(yi_fixed, yi_fixed, scale);
+        int64_t magnitude_squared = fixed_add(xi_squared, yi_squared);
+        
+        /* Check if magnitude^2 > 4.0 */
+        if (magnitude_squared > scale_4_0)
+        {
+          break;
+        }
+        
+        /* Calculate new xi and yi */
+        int64_t tmp = fixed_add(fixed_add(xi_squared, -yi_squared), x0_fixed);
+        yi_fixed = fixed_add(fixed_multiply(fixed_multiply(xi_fixed, yi_fixed, scale), scale_2_0, scale), y0_fixed);
+        xi_fixed = tmp;
+        
+        ++iteration;
+      }
+      mandelbrot_sum += iteration;
+    }
+  }
+  
+  /* Store overflow count for this scaling factor */
+  g_fixed_overflow_count[g_current_scaling_index] = overflow_count;
+  
+  return mandelbrot_sum;
+}
+
+/* Task 8: Power Measurement Analysis - STM32F0 */
+static void analyze_power_consumption_f0(void)
+{
+  printf("\r\n=== Task 8: Power Measurement Analysis - STM32F0 ===\r\n");
+  
+  /* Measure using HAL_GetTick() */
+  uint32_t start_ms = HAL_GetTick();
+  
+  /* Run Mandelbrot calculation */
+  uint32_t checksum = generate_mandelbrot_checksum(128, 128, 100);
+  
+  uint32_t end_ms = HAL_GetTick();
+  uint32_t calculation_ms = end_ms - start_ms;
+  
+  /* Estimate power consumption */
+  double calculation_time_s = (double)calculation_ms / 1000.0;
+  double estimated_power_mw = estimate_power_consumption_f0(calculation_ms);
+  double energy_consumption_mj = estimated_power_mw * calculation_time_s * 1000.0;
+  
+  /* Store results for Live Expressions */
+  g_estimated_power_f0_mw = estimated_power_mw;
+  g_energy_consumption_f0_mj = energy_consumption_mj;
+  g_power_measurement_cycles = calculation_ms;  /* Store ms as cycles for F0 */
+  
+  printf("F0 Power Analysis:\r\n");
+  printf("- Calculation time: %lu ms\r\n", (unsigned long)calculation_ms);
+  printf("- Calculation time: %.6f seconds\r\n", calculation_time_s);
+  printf("- Estimated power: %.2f mW\r\n", estimated_power_mw);
+  printf("- Energy consumption: %.6f mJ\r\n", energy_consumption_mj);
+  printf("- Checksum: %lu\r\n", (unsigned long)checksum);
+}
+
+static double estimate_power_consumption_f0(uint32_t elapsed_ms)
+{
+  /* Power estimation based on STM32F051 datasheet */
+  /* Typical power consumption at 48 MHz: ~20-30 mW */
+  /* This is a rough estimation based on execution time */
+  
+  double base_power_mw = 25.0;  /* Base power consumption */
+  double cpu_activity_factor = 1.0;  /* Assume full CPU utilization */
+  
+  return base_power_mw * cpu_activity_factor;
+}
+
+static void extrapolate_power_consumption_f0(void)
+{
+  printf("\r\n=== F0 Power Extrapolation ===\r\n");
+  
+  /* Extrapolation for different resolutions */
+  static const uint16_t resolutions[5] = {128, 160, 192, 224, 256};
+  static const char* resolution_names[5] = {"128x128", "160x160", "192x192", "224x224", "256x256"};
+  
+  printf("Resolution Scaling (100 iterations):\r\n");
+  for (int i = 0; i < 5; ++i)
+  {
+    double scale_factor = (double)(resolutions[i] * resolutions[i]) / (double)(128 * 128);
+    double estimated_power = g_estimated_power_f0_mw * scale_factor;
+    double estimated_energy = g_energy_consumption_f0_mj * scale_factor;
+    
+    printf("%s: %.1f mW, %.3f mJ\r\n", resolution_names[i], estimated_power, estimated_energy);
+  }
+  
+  /* Extrapolation for different iterations */
+  static const uint32_t iterations[5] = {100, 250, 500, 750, 1000};
+  
+  printf("\r\nIteration Scaling (128x128):\r\n");
+  for (int i = 0; i < 5; ++i)
+  {
+    double scale_factor = (double)iterations[i] / 100.0;
+    double estimated_power = g_estimated_power_f0_mw * scale_factor;
+    double estimated_energy = g_energy_consumption_f0_mj * scale_factor;
+    
+    printf("%lu iter: %.1f mW, %.3f mJ\r\n", (unsigned long)iterations[i], estimated_power, estimated_energy);
+  }
 }
 
 /* USER CODE END 4 */
