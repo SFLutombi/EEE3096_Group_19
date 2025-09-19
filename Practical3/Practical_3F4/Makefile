@@ -21,9 +21,9 @@ TARGET = Practical_3F4
 # debug build?
 DEBUG = 1
 
-# TODO:Compiler Optimisation levels
+# Task 6: Compiler Optimization Analysis - O3 (Aggressive Optimization)
 # optimization
-OPT = -Og
+OPT = -O3
 
 #######################################
 # paths
@@ -92,12 +92,11 @@ BIN = $(CP) -O binary -S
 # cpu
 CPU = -mcpu=cortex-m4
 
-# FPU DISABLED for Task 5
 # fpu
-FPU = 
+FPU = -mfpu=fpv4-sp-d16
 
 # float-abi
-FLOAT-ABI = -mfloat-abi=soft
+FLOAT-ABI = -mfloat-abi=hard
 
 # mcu
 MCU = $(CPU) -mthumb $(FPU) $(FLOAT-ABI)

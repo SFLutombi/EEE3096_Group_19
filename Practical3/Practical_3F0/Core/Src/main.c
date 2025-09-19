@@ -24,6 +24,13 @@
 
 /* USER CODE END Includes */
 
+/* Task 6: Global variables for Live Expressions - Must be declared here for debugger access */
+uint32_t g_total_program_cycles = 0u;
+double g_total_program_time_ms = 0.0;
+double g_total_time_sum = 0.0;
+uint32_t g_test_counter = 0u;
+uint32_t g_simple_test = 0u;  /* Simple test variable */
+
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
@@ -42,11 +49,11 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* Task 4: Scalability test up to Full HD (1920x1080) with tiling */
+/* Task 6: Compiler Optimization Analysis - Practical 1B sizes */
 static const uint32_t kMaxIter = 100u;
-static const uint32_t kNumResolutions = 8;
-static const uint16_t kWidths[8]  = {128, 256, 512, 640, 800, 1024, 1280, 1920};
-static const uint16_t kHeights[8] = {128, 256, 512, 480, 600, 768, 720, 1080};
+static const uint32_t kNumResolutions = 5;
+static const uint16_t kWidths[5]  = {128, 160, 192, 224, 256};  /* Practical 1B sizes */
+static const uint16_t kHeights[5] = {128, 160, 192, 224, 256};
 
 /* Memory management for large images */
 #define MAX_TILE_SIZE 128  /* Smaller tile size for F0 due to limited SRAM */
@@ -61,10 +68,10 @@ volatile double g_current_execution_time = 0.0;
 volatile double g_current_throughput = 0.0;
 
 /* Live Expressions: per-size results */
-volatile uint32_t checksum[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-volatile double execution_time_ms[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-volatile uint32_t cpu_cycles[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-volatile double throughput_pps[8] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t checksum[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double execution_time_ms[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+volatile uint32_t cpu_cycles[5] = {0u, 0u, 0u, 0u, 0u};
+volatile double throughput_pps[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 
 /* Task 4: Tiling information */
 volatile uint32_t g_num_tiles_x = 0u;
@@ -120,6 +127,12 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
+  
+  /* Initialize Task 6 timing variables */
+  g_total_program_cycles = 0u;
+  g_total_program_time_ms = 0.0;
+  g_total_time_sum = 0.0;
+  g_test_counter = 0u;
 
   /* USER CODE END 2 */
 
@@ -130,6 +143,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+      /* Increment test counters to verify Live Expressions work */
+      g_test_counter++;
+      g_simple_test++;
+      
+      /* Start total program timing */
+      uint32_t program_start_ms = HAL_GetTick();
+      
       /* Visual indicator: LED0 ON */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
@@ -172,6 +192,20 @@ int main(void)
         cpu_cycles[size_index] = estimated_cycles;
         throughput_pps[size_index] = throughput;
       }
+
+      /* End total program timing */
+      uint32_t program_end_ms = HAL_GetTick();
+      uint32_t total_elapsed_ms = program_end_ms - program_start_ms;
+      g_total_program_time_ms = (double)total_elapsed_ms;
+      
+      /* Calculate total time sum from individual tests */
+      g_total_time_sum = 0.0;
+      for (uint32_t i = 0; i < kNumResolutions; ++i) {
+        g_total_time_sum += execution_time_ms[i];
+      }
+      
+      /* Debug: Store raw values for debugging */
+      g_total_program_cycles = total_elapsed_ms;  /* Store raw ms value for debugging */
 
       /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);

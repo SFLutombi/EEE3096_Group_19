@@ -85,6 +85,11 @@ volatile double speedup_factor[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
 volatile uint32_t g_current_test_mode = 0u; /* 0=float, 1=double */
 volatile uint32_t g_fpu_enabled = 1u; /* 1=FPU enabled, 0=FPU disabled */
 
+/* Task 6: Total program runtime measurement */
+volatile uint32_t g_total_program_cycles = 0u;
+volatile double g_total_program_time_ms = 0.0;
+volatile double g_total_time_sum = 0.0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -150,6 +155,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+      /* Start total program timing */
+      DWT->CYCCNT = 0;
+      uint32_t program_start_cycles = dwt_get_cycles();
+      
       /* Visual indicator: LED0 ON */
       HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
@@ -245,6 +254,17 @@ int main(void)
         speedup_factor[size_index] = speedup;
         
         log_fpu_comparison(w, h, checksum_float[size_index], checksum_double[size_index], speedup);
+      }
+
+      /* End total program timing */
+      uint32_t program_end_cycles = dwt_get_cycles();
+      g_total_program_cycles = program_end_cycles - program_start_cycles;
+      g_total_program_time_ms = (double)g_total_program_cycles / (double)SystemCoreClock * 1000.0;
+      
+      /* Calculate total time sum from individual tests */
+      g_total_time_sum = 0.0;
+      for (uint32_t i = 0; i < kNumResolutions; ++i) {
+        g_total_time_sum += execution_time_ms_float[i] + execution_time_ms_double[i];
       }
 
       /* Visual indicator: LED1 ON, keep ON 2s, then turn both OFF */
